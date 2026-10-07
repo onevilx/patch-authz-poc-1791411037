@@ -1,0 +1,37 @@
+# Stand-in for release-patch-1-create-pr.yml. Logs only; publishes nothing.
+name: 'Release: Patch (1) Create PR'
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'The commit SHA to cherry-pick for the patch.'
+        required: true
+        type: 'string'
+      channel:
+        required: true
+        type: 'choice'
+        options: ['stable', 'preview']
+      original_pr:
+        required: false
+        type: 'string'
+      environment:
+        required: false
+        type: 'choice'
+        options: ['prod', 'dev']
+        default: 'prod'
+
+jobs:
+  create-patch:
+    runs-on: 'ubuntu-latest'
+    steps:
+      - name: 'Show who reached the release pipeline'
+        run: |
+          echo "=============================================="
+          echo " PATCH RELEASE PIPELINE REACHED"
+          echo "=============================================="
+          echo "triggering_actor = ${{ github.triggering_actor }}"
+          echo "commit           = ${{ github.event.inputs.commit }}"
+          echo "channel          = ${{ github.event.inputs.channel }}"
+          echo "original_pr      = ${{ github.event.inputs.original_pr }}"
+          echo "environment      = ${{ github.event.inputs.environment }}"

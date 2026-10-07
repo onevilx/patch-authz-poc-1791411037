@@ -1,0 +1,88 @@
+# Faithful replica of google-gemini/gemini-cli
+# .github/workflows/release-patch-0-from-comment.yml (live as of 2026-10-07)
+# Purpose: test whether the authorization gate actually gates the pipeline.
+name: 'Release: Patch (0) from Comment'
+
+on:
+  issue_comment:
+    types: ['created']
+
+jobs:
+  slash-command:
+    runs-on: 'ubuntu-latest'
+    # Only run if the comment is from a human user (not automated)
+    if: "github.event.comment.user.type == 'User' && github.event.comment.user.login != 'github-actions[bot]'"
+    permissions:
+      contents: 'write'
+      pull-requests: 'write'
+      actions: 'write'
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8'
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: 'Slash Command Dispatch'
+        id: 'slash_command'
+        uses: 'peter-evans/slash-command-dispatch@40877f718dce0101edfc7aea2b3800cc192f9ed5'
+        with:
+          token: '${{ secrets.GITHUB_TOKEN }}'
+          commands: 'patch'
+          permission: 'write'
+          issue-type: 'pull-request'
+
+      - name: 'PROBE -- did the authorization gate fail the step?'
+        if: 'always()'
+        run: |
+          echo "actor                     = ${{ github.actor }}"
+          echo "author_association        = ${{ github.event.comment.author_association }}"
+          echo "slash_command.outcome     = ${{ steps.slash_command.outcome }}"
+          echo "slash_command.conclusion  = ${{ steps.slash_command.conclusion }}"
+
+      - name: 'Get PR Status'
+        id: 'pr_status'
+        if: "startsWith(github.event.comment.body, '/patch')"
+        env:
+          GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+        run: |
+          echo ">>> REACHED 'Get PR Status' as ${{ github.actor }}"
+          gh pr view "${{ github.event.issue.number }}" --json mergeCommit,state > pr_status.json
+          echo "MERGE_COMMIT_SHA=$(jq -r .mergeCommit.oid pr_status.json)" >> "$GITHUB_OUTPUT"
+          echo "STATE=$(jq -r .state pr_status.json)" >> "$GITHUB_OUTPUT"
+
+      - name: 'Dispatch if Merged'
+        if: "steps.pr_status.outputs.STATE == 'MERGED'"
+        id: 'dispatch_patch'
+        uses: 'actions/github-script@00f12e3e20659f42342b1c0226afda7f7c042325'
+        env:
+          COMMENT_BODY: '${{ github.event.comment.body }}'
+        with:
+          github-token: '${{ secrets.GITHUB_TOKEN }}'
+          script: |
+            const commentBody = process.env.COMMENT_BODY;
+            let channels = ['stable', 'preview'];
+            if (commentBody.trim() === '/patch' || commentBody.trim() === '/patch both') {
+              channels = ['stable', 'preview'];
+            } else if (commentBody.trim() === '/patch stable') {
+              channels = ['stable'];
+            } else if (commentBody.trim() === '/patch preview') {
+              channels = ['preview'];
+            }
+            core.info(`>>> REACHED 'Dispatch if Merged' as ${context.actor}`);
+            core.info(`>>> dispatching channels: ${channels.join(',')}`);
+            for (const channel of channels) {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'patch1-target.yml',
+                ref: 'main',
+                inputs: {
+                  commit: '${{ steps.pr_status.outputs.MERGE_COMMIT_SHA }}',
+                  channel: channel,
+                  original_pr: '${{ github.event.issue.number }}',
+                  environment: 'prod'
+                }
+              });
+              core.info(`>>> dispatched patch1-target.yml channel=${channel}`);
+            }
